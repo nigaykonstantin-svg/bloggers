@@ -123,6 +123,16 @@ export default function Login() {
                             <p>Блогер: <code className="bg-white px-2 py-0.5 rounded">anna@example.com</code> / <code className="bg-white px-2 py-0.5 rounded">password123</code></p>
                             <p>Админ: <code className="bg-white px-2 py-0.5 rounded">admin@mixit.ru</code> / <code className="bg-white px-2 py-0.5 rounded">admin123</code></p>
                         </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                localStorage.clear();
+                                window.location.reload();
+                            }}
+                            className="mt-3 w-full text-sm text-gray-500 hover:text-mixit-pink underline"
+                        >
+                            🔄 Сбросить демо-данные
+                        </button>
                     </div>
                 </div>
             </div>
