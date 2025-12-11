@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, MapPin, Phone, User, MessageSquare, Check } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useCollaborations } from '../data/collaborations';
 import { levels } from '../data/levels';
 
 export default function NewCollaboration() {
     const { items, clearCart } = useCart();
     const { user } = useAuth();
+    const { createCollaboration } = useCollaborations();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
@@ -33,8 +35,17 @@ export default function NewCollaboration() {
         e.preventDefault();
         setLoading(true);
 
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Create collaboration with shared context
+        const productIds = items.map(item => item.id);
+        createCollaboration(
+            user?.id || Date.now(),
+            productIds,
+            formData,
+            deadline.toISOString()
+        );
+
+        // Simulate small delay for UX
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         setSuccess(true);
         setLoading(false);
