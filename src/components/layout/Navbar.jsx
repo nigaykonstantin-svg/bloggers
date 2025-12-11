@@ -1,9 +1,32 @@
+import { useMemo } from 'react';
 import { Menu, ShoppingBag, Bell } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
-import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { useCollaborations } from '../../data/collaborations';
+import { Link, useNavigate } from 'react-router-dom';
 
 export default function Navbar({ onMenuClick }) {
     const { items } = useCart();
+    const { user } = useAuth();
+    const { getCollaborationsByBloggerId, collaborations } = useCollaborations();
+    const navigate = useNavigate();
+
+    const notifications = useMemo(() => {
+        if (!user) return [];
+        const userCollabs = getCollaborationsByBloggerId(user.id) || [];
+
+        // Find urgent deadlines (within 3 days)
+        const urgent = userCollabs.filter(c => {
+            if (c.status !== 'waiting_content' || !c.deadline) return false;
+            const daysLeft = Math.ceil((new Date(c.deadline) - new Date()) / (1000 * 60 * 60 * 24));
+            return daysLeft <= 3;
+        });
+
+        // Find unshipped pending (stuck for > 3 days) - illustration
+        // Find completed recently (for rating notification) - illustration
+
+        return urgent.length;
+    }, [user, collaborations]);
 
     return (
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-lg border-b border-gray-100">
@@ -19,7 +42,7 @@ export default function Navbar({ onMenuClick }) {
                 {/* Page title - can be dynamic */}
                 <div className="hidden lg:block">
                     <h1 className="text-lg font-semibold text-dark">
-                        Добро пожаловать!
+                        Добро пожаловать, {user?.firstName}!
                     </h1>
                 </div>
 
@@ -32,9 +55,14 @@ export default function Navbar({ onMenuClick }) {
 
                 {/* Actions */}
                 <div className="flex items-center gap-2">
-                    <button className="p-2 hover:bg-gray-100 rounded-lg relative">
-                        <Bell className="w-5 h-5 text-gray-600" />
-                        <span className="absolute top-1 right-1 w-2 h-2 bg-mixit-pink rounded-full"></span>
+                    <button
+                        onClick={() => navigate('/dashboard')}
+                        className="p-2 hover:bg-gray-100 rounded-lg relative"
+                    >
+                        <Bell className={`w-5 h-5 ${notifications > 0 ? 'text-mixit-pink' : 'text-gray-600'}`} />
+                        {notifications > 0 && (
+                            <span className="absolute top-1 right-1 w-2 h-2 bg-mixit-pink rounded-full animate-pulse"></span>
+                        )}
                     </button>
 
                     <Link
