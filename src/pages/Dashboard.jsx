@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, Package, Clock, Trophy, TrendingUp } from 'lucide-react';
+import { useMemo } from 'react';
+import { ArrowRight, Package, Clock, Trophy, TrendingUp, AlertTriangle, CheckCircle, Lightbulb } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getCollaborationsByBloggerId, statusLabels, statusColors } from '../data/collaborations';
+import { useCollaborations, statusLabels, statusColors } from '../data/collaborations';
 import { getProductById } from '../data/products';
 import { levels, getNextLevel, getLevelProgress } from '../data/levels';
 import LevelBadge from '../components/ui/LevelBadge';
@@ -11,15 +12,44 @@ import CountdownTimer from '../components/ui/CountdownTimer';
 
 export default function Dashboard() {
     const { user } = useAuth();
-    const collaborations = getCollaborationsByBloggerId(user?.id) || [];
-    const activeCollabs = collaborations.filter(c => c.status !== 'completed');
-    const completedCollabs = collaborations.filter(c => c.status === 'completed');
+    const { getCollaborationsByBloggerId, collaborations } = useCollaborations();
 
-    const currentLevel = levels[user?.level];
+    const userCollabs = useMemo(() => {
+        return getCollaborationsByBloggerId(user?.id) || [];
+    }, [user?.id, collaborations]);
+
+    const activeCollabs = userCollabs.filter(c => !['completed', 'cancelled'].includes(c.status));
+    const completedCollabs = userCollabs.filter(c => c.status === 'completed');
+
+    const currentLevel = levels[user?.level || 'beginner'];
     const nextLevel = getNextLevel(user?.level);
     const progress = getLevelProgress(user?.level, user?.points || 0);
 
     const mainSocial = user?.socialAccounts?.[0];
+
+    // Find urgent deadlines (within 3 days)
+    const urgentDeadlines = useMemo(() => {
+        return activeCollabs
+            .filter(c => c.status === 'waiting_content' && c.deadline)
+            .map(c => {
+                const deadline = new Date(c.deadline);
+                const now = new Date();
+                const daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+                return { ...c, daysLeft };
+            })
+            .filter(c => c.daysLeft <= 7 && c.daysLeft > 0)
+            .sort((a, b) => a.daysLeft - b.daysLeft);
+    }, [activeCollabs]);
+
+    // Daily tip
+    const tips = [
+        "Снимайте контент при естественном освещении — он набирает больше просмотров",
+        "Покажите текстуру продукта крупным планом — это увеличивает вовлечённость",
+        "Расскажите личную историю использования — аудитория любит искренность",
+        "Отмечайте @mixit.ru в публикациях для репоста",
+        "Используйте трендовые звуки в Reels для большего охвата",
+    ];
+    const dailyTip = tips[new Date().getDate() % tips.length];
 
     return (
         <div className="space-y-6 animate-fade-in">
@@ -27,7 +57,7 @@ export default function Dashboard() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                     <h1 className="text-2xl sm:text-3xl font-bold text-dark">
-                        Привет, {user?.firstName}! 👋
+                        Привет, {user?.firstName || 'Блогер'}! 👋
                     </h1>
                     <p className="text-gray-600 mt-1">
                         Добро пожаловать в личный кабинет MIXIT Creators
@@ -39,6 +69,50 @@ export default function Dashboard() {
                     <ArrowRight className="ml-2 w-4 h-4" />
                 </Link>
             </div>
+
+            {/* Urgent Deadline Alert */}
+            {urgentDeadlines.length > 0 && (
+                <div className={`rounded-2xl p-4 flex items-start gap-4 ${urgentDeadlines[0].daysLeft <= 1 ? 'bg-red-50 border border-red-200' :
+                        urgentDeadlines[0].daysLeft <= 3 ? 'bg-amber-50 border border-amber-200' :
+                            'bg-blue-50 border border-blue-200'
+                    }`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${urgentDeadlines[0].daysLeft <= 1 ? 'bg-red-100' :
+                            urgentDeadlines[0].daysLeft <= 3 ? 'bg-amber-100' :
+                                'bg-blue-100'
+                        }`}>
+                        <AlertTriangle className={`w-5 h-5 ${urgentDeadlines[0].daysLeft <= 1 ? 'text-red-600' :
+                                urgentDeadlines[0].daysLeft <= 3 ? 'text-amber-600' :
+                                    'text-blue-600'
+                            }`} />
+                    </div>
+                    <div>
+                        <p className={`font-semibold ${urgentDeadlines[0].daysLeft <= 1 ? 'text-red-700' :
+                                urgentDeadlines[0].daysLeft <= 3 ? 'text-amber-700' :
+                                    'text-blue-700'
+                            }`}>
+                            {urgentDeadlines[0].daysLeft <= 1 ? '🚨 Последний день!' :
+                                urgentDeadlines[0].daysLeft <= 3 ? '⚠️ Срочно!' :
+                                    '⏰ Напоминание'}
+                        </p>
+                        <p className={`text-sm mt-1 ${urgentDeadlines[0].daysLeft <= 1 ? 'text-red-600' :
+                                urgentDeadlines[0].daysLeft <= 3 ? 'text-amber-600' :
+                                    'text-blue-600'
+                            }`}>
+                            До дедлайна по коллаборации #{urgentDeadlines[0].id} осталось {urgentDeadlines[0].daysLeft} дн.
+                            Не забудьте отправить контент!
+                        </p>
+                        <Link
+                            to={`/collaboration/${urgentDeadlines[0].id}`}
+                            className={`inline-block mt-2 text-sm font-medium underline ${urgentDeadlines[0].daysLeft <= 1 ? 'text-red-700' :
+                                    urgentDeadlines[0].daysLeft <= 3 ? 'text-amber-700' :
+                                        'text-blue-700'
+                                }`}
+                        >
+                            Перейти к коллаборации →
+                        </Link>
+                    </div>
+                </div>
+            )}
 
             {/* Stats Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -54,12 +128,12 @@ export default function Dashboard() {
 
                 <div className="stat-card">
                     <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mx-auto mb-3">
-                        <Package className="w-6 h-6 text-green-600" />
+                        <CheckCircle className="w-6 h-6 text-green-600" />
                     </div>
                     <div className="stat-value">
                         <AnimatedCounter value={completedCollabs.length} />
                     </div>
-                    <div className="stat-label">Коллабораций</div>
+                    <div className="stat-label">Завершено</div>
                 </div>
 
                 <div className="stat-card">
@@ -77,9 +151,20 @@ export default function Dashboard() {
                         <Clock className="w-6 h-6 text-purple-600" />
                     </div>
                     <div className="stat-value">
-                        <AnimatedCounter value={activeCollabs.length} />
+                        {activeCollabs.length}/{currentLevel?.maxActiveCollabs || 1}
                     </div>
                     <div className="stat-label">Активных</div>
+                </div>
+            </div>
+
+            {/* Daily Tip */}
+            <div className="bg-gradient-to-r from-mixit-pink/10 to-purple-100/50 rounded-2xl p-4 flex items-start gap-4">
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <Lightbulb className="w-5 h-5 text-mixit-pink" />
+                </div>
+                <div>
+                    <p className="font-medium text-dark">💡 Совет дня</p>
+                    <p className="text-sm text-gray-600 mt-1">{dailyTip}</p>
                 </div>
             </div>
 
@@ -105,7 +190,7 @@ export default function Dashboard() {
                         <div>
                             <LevelBadge level={user?.level} size="lg" />
                             <p className="text-sm text-gray-500 mt-1">
-                                Лимит: до {currentLevel?.productLimit?.max} продуктов
+                                До {currentLevel?.productLimit?.max} продуктов • {currentLevel?.deadlineDays} дней
                             </p>
                         </div>
                     </div>
@@ -194,6 +279,12 @@ export default function Dashboard() {
                                         Отправлено {new Date(collab.shippedAt).toLocaleDateString('ru-RU')}
                                     </p>
                                 )}
+
+                                {collab.status === 'pending' && (
+                                    <p className="text-sm text-gray-600">
+                                        ⏳ Ожидает обработки администратором
+                                    </p>
+                                )}
                             </Link>
                         ))}
                     </div>
@@ -233,7 +324,7 @@ export default function Dashboard() {
                         </div>
                         <div>
                             <h3 className="font-semibold text-dark">Достижения</h3>
-                            <p className="text-sm text-gray-500">{user?.achievements?.length || 0} из 6</p>
+                            <p className="text-sm text-gray-500">{user?.achievements?.length || 0} получено</p>
                         </div>
                     </div>
                 </Link>
