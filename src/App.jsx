@@ -31,6 +31,7 @@ import Analytics from './pages/admin/Analytics';
 
 // Telegram Mini App
 import TelegramApp from './pages/telegram/TelegramApp';
+import ProfitOptimizer from './pages/ProfitOptimizer';
 
 function App() {
   return (
@@ -47,6 +48,9 @@ function App() {
                 <Route path="/" element={<Landing />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+
+                {/* Profit Optimizer prototype */}
+                <Route path="/profit-optimizer" element={<ProfitOptimizer />} />
 
                 {/* Blogger Dashboard Routes */}
                 <Route element={<DashboardLayout />}>
