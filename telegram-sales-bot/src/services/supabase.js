@@ -75,7 +75,26 @@ export const CATEGORIES = {
 export const CATEGORY_KEYS = Object.keys(CATEGORIES);
 
 /**
- * Получить факт на сегодня по категориям (из реальной таблицы WB)
+ * Получить последнюю доступную дату в таблице
+ */
+async function getLatestDate() {
+  if (!supabase) return new Date().toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from(WB_TABLE)
+    .select('date')
+    .order('date', { ascending: false })
+    .limit(1);
+
+  if (error || !data || data.length === 0) {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  return data[0].date;
+}
+
+/**
+ * Получить факт на последний день по категориям (из реальной таблицы WB)
  */
 export async function getCategoryPlanFactToday() {
   const cacheKey = 'category_plan_fact_today';
@@ -86,13 +105,13 @@ export async function getCategoryPlanFactToday() {
     return getMockCategoryPlanFactToday();
   }
 
-  // Запрос к реальной таблице WB
-  const today = new Date().toISOString().split('T')[0];
+  // Берём последнюю доступную дату из базы
+  const latestDate = await getLatestDate();
 
   const { data, error } = await supabase
     .from(WB_TABLE)
     .select('category_wb, orders, revenue_gross, impressions, clicks, add_to_cart, drr_search, drr_media, drr_bloggers, drr_others, sku')
-    .eq('date', today);
+    .eq('date', latestDate);
 
   if (error) {
     console.error('Error fetching today data:', error);
@@ -117,15 +136,16 @@ export async function getCategoryPlanFactMTD() {
     return getMockCategoryPlanFactMTD();
   }
 
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-  const today = now.toISOString().split('T')[0];
+  // Берём последнюю доступную дату и считаем MTD от начала того месяца
+  const latestDate = await getLatestDate();
+  const latestDateObj = new Date(latestDate);
+  const monthStart = new Date(latestDateObj.getFullYear(), latestDateObj.getMonth(), 1).toISOString().split('T')[0];
 
   const { data, error } = await supabase
     .from(WB_TABLE)
     .select('category_wb, orders, revenue_gross, impressions, clicks, add_to_cart, drr_search, drr_media, drr_bloggers, drr_others, sku')
     .gte('date', monthStart)
-    .lte('date', today);
+    .lte('date', latestDate);
 
   if (error) {
     console.error('Error fetching MTD data:', error);
