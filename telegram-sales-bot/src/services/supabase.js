@@ -1,12 +1,17 @@
 /**
  * Сервис для работы с Supabase
  * Получение данных для аналитики продаж
+ *
+ * Поддерживает реальные данные Wildberries (таблица 6mWB17jun_15dec)
  */
 
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+
+// Реальная таблица с данными WB
+const WB_TABLE = '6mWB17jun_15dec';
 
 if (!supabaseUrl || !supabaseKey) {
   console.warn('⚠️ Supabase credentials not configured. Using mock data.');
@@ -15,6 +20,31 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)
   : null;
+
+/**
+ * Маппинг категорий Wildberries → наши
+ */
+const CATEGORY_MAP = {
+  'Уход за лицом': 'face',
+  'Уход за волосами': 'hair',
+  'Уход за вoлосами': 'hair', // с латинской "o"
+  'Уход за телом': 'body',
+  'Макияж': 'makeup',
+};
+
+function mapCategory(categoryWb) {
+  return CATEGORY_MAP[categoryWb] || 'other';
+}
+
+function getWbCategories(categoryKey) {
+  const map = {
+    face: ['Уход за лицом'],
+    hair: ['Уход за волосами', 'Уход за вoлосами'],
+    body: ['Уход за телом'],
+    makeup: ['Макияж'],
+  };
+  return map[categoryKey] || [];
+}
 
 // Кеш для агрегатов (обновляется раз в 5-15 минут)
 const cache = new Map();
@@ -45,7 +75,7 @@ export const CATEGORIES = {
 export const CATEGORY_KEYS = Object.keys(CATEGORIES);
 
 /**
- * Получить план/факт на сегодня по категориям
+ * Получить факт на сегодня по категориям (из реальной таблицы WB)
  */
 export async function getCategoryPlanFactToday() {
   const cacheKey = 'category_plan_fact_today';
@@ -56,22 +86,27 @@ export async function getCategoryPlanFactToday() {
     return getMockCategoryPlanFactToday();
   }
 
+  // Запрос к реальной таблице WB
+  const today = new Date().toISOString().split('T')[0];
+
   const { data, error } = await supabase
-    .from('v_category_plan_fact_today')
-    .select('*')
-    .order('sort_order');
+    .from(WB_TABLE)
+    .select('category_wb, orders, revenue_gross, impressions, clicks, add_to_cart, profit_incl_marketing, drr_search, drr_media, drr_bloggers, drr_others, sku')
+    .eq('date', today);
 
   if (error) {
     console.error('Error fetching today data:', error);
     return getMockCategoryPlanFactToday();
   }
 
-  setCache(cacheKey, data);
-  return data;
+  // Агрегируем по категориям
+  const result = aggregateByCategory(data, 'today');
+  setCache(cacheKey, result);
+  return result;
 }
 
 /**
- * Получить план/факт MTD по категориям
+ * Получить факт MTD по категориям (из реальной таблицы WB)
  */
 export async function getCategoryPlanFactMTD() {
   const cacheKey = 'category_plan_fact_mtd';
@@ -82,22 +117,28 @@ export async function getCategoryPlanFactMTD() {
     return getMockCategoryPlanFactMTD();
   }
 
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  const today = now.toISOString().split('T')[0];
+
   const { data, error } = await supabase
-    .from('v_category_plan_fact_mtd')
-    .select('*')
-    .order('sort_order');
+    .from(WB_TABLE)
+    .select('category_wb, orders, revenue_gross, impressions, clicks, add_to_cart, profit_incl_marketing, drr_search, drr_media, drr_bloggers, drr_others, sku')
+    .gte('date', monthStart)
+    .lte('date', today);
 
   if (error) {
     console.error('Error fetching MTD data:', error);
     return getMockCategoryPlanFactMTD();
   }
 
-  setCache(cacheKey, data);
-  return data;
+  const result = aggregateByCategory(data, 'mtd');
+  setCache(cacheKey, result);
+  return result;
 }
 
 /**
- * Получить подкатегории для категории
+ * Получить подкатегории для категории (из реальной таблицы WB)
  */
 export async function getSubcategoriesMTD(categoryKey) {
   const cacheKey = `subcategories_${categoryKey}`;
@@ -108,23 +149,57 @@ export async function getSubcategoriesMTD(categoryKey) {
     return getMockSubcategoriesMTD(categoryKey);
   }
 
+  const wbCategories = getWbCategories(categoryKey);
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+
   const { data, error } = await supabase
-    .from('v_subcategory_plan_fact_mtd')
-    .select('*')
-    .eq('category_key', categoryKey)
-    .order('fact_revenue_mtd', { ascending: false });
+    .from(WB_TABLE)
+    .select('subcategory_wb, orders, revenue_gross, profit_incl_marketing, drr_search, drr_media, drr_bloggers, drr_others, sku')
+    .in('category_wb', wbCategories)
+    .gte('date', monthStart);
 
   if (error) {
     console.error('Error fetching subcategories:', error);
     return getMockSubcategoriesMTD(categoryKey);
   }
 
-  setCache(cacheKey, data);
-  return data;
+  // Агрегируем по подкатегориям
+  const grouped = {};
+  for (const row of data) {
+    const sub = row.subcategory_wb || 'Без категории';
+    if (!grouped[sub]) {
+      grouped[sub] = {
+        category_key: categoryKey,
+        category_name: CATEGORIES[categoryKey].name,
+        subcategory: sub,
+        fact_revenue_mtd: 0,
+        fact_units_mtd: 0,
+        profit_mtd: 0,
+        ads_spend_mtd: 0,
+        products: new Set(),
+      };
+    }
+    grouped[sub].fact_units_mtd += row.orders || 0;
+    grouped[sub].fact_revenue_mtd += row.revenue_gross || 0;
+    grouped[sub].profit_mtd += row.profit_incl_marketing || 0;
+    grouped[sub].ads_spend_mtd += (row.drr_search || 0) + (row.drr_media || 0) + (row.drr_bloggers || 0) + (row.drr_others || 0);
+    grouped[sub].products.add(row.sku);
+  }
+
+  const result = Object.values(grouped).map(g => ({
+    ...g,
+    products_count: g.products.size,
+    revenue_completion_pct: 100, // нет плана
+    mom_revenue_pct: null, // TODO: добавить MoM
+  })).sort((a, b) => b.fact_revenue_mtd - a.fact_revenue_mtd);
+
+  setCache(cacheKey, result);
+  return result;
 }
 
 /**
- * Получить топ-N товаров по категории
+ * Получить топ-N товаров по категории (из реальной таблицы WB)
  */
 export async function getTopProductsByCategory(categoryKey, limit = 10) {
   const cacheKey = `top_products_${categoryKey}_${limit}`;
@@ -135,20 +210,65 @@ export async function getTopProductsByCategory(categoryKey, limit = 10) {
     return getMockTopProducts(categoryKey, limit);
   }
 
+  const wbCategories = getWbCategories(categoryKey);
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+
   const { data, error } = await supabase
-    .from('v_top_products_by_category_mtd')
-    .select('*')
-    .eq('category_key', categoryKey)
-    .lte('rank_in_category', limit)
-    .order('rank_in_category');
+    .from(WB_TABLE)
+    .select('sku, product_name_1c, subcategory_wb, orders, revenue_gross, profit_incl_marketing, impressions, clicks, drr_search, drr_media, drr_bloggers, drr_others, price, stock_units')
+    .in('category_wb', wbCategories)
+    .gte('date', monthStart);
 
   if (error) {
     console.error('Error fetching top products:', error);
     return getMockTopProducts(categoryKey, limit);
   }
 
-  setCache(cacheKey, data);
-  return data;
+  // Агрегируем по SKU
+  const grouped = {};
+  for (const row of data) {
+    if (!grouped[row.sku]) {
+      grouped[row.sku] = {
+        sku: row.sku,
+        title: row.product_name_1c,
+        category_key: categoryKey,
+        category_name: CATEGORIES[categoryKey].name,
+        subcategory: row.subcategory_wb,
+        units_mtd: 0,
+        revenue_mtd: 0,
+        profit_mtd: 0,
+        impressions_mtd: 0,
+        clicks_mtd: 0,
+        ads_spend_mtd: 0,
+        prices: [],
+        stocks: [],
+      };
+    }
+    grouped[row.sku].units_mtd += row.orders || 0;
+    grouped[row.sku].revenue_mtd += row.revenue_gross || 0;
+    grouped[row.sku].profit_mtd += row.profit_incl_marketing || 0;
+    grouped[row.sku].impressions_mtd += row.impressions || 0;
+    grouped[row.sku].clicks_mtd += row.clicks || 0;
+    grouped[row.sku].ads_spend_mtd += (row.drr_search || 0) + (row.drr_media || 0) + (row.drr_bloggers || 0) + (row.drr_others || 0);
+    if (row.price) grouped[row.sku].prices.push(row.price);
+    if (row.stock_units) grouped[row.sku].stocks.push(row.stock_units);
+  }
+
+  const result = Object.values(grouped)
+    .map(g => ({
+      ...g,
+      avg_price: g.prices.length > 0 ? Math.round(g.prices.reduce((a, b) => a + b, 0) / g.prices.length) : 0,
+      avg_stock: g.stocks.length > 0 ? Math.round(g.stocks.reduce((a, b) => a + b, 0) / g.stocks.length) : 0,
+      drr_pct: g.revenue_mtd > 0 ? Math.round(g.ads_spend_mtd / g.revenue_mtd * 1000) / 10 : 0,
+      margin_percent: g.revenue_mtd > 0 ? Math.round(g.profit_mtd / g.revenue_mtd * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.revenue_mtd - a.revenue_mtd)
+    .slice(0, limit)
+    .map((p, i) => ({ ...p, rank_in_category: i + 1 }));
+
+  setCache(cacheKey, result);
+  return result;
 }
 
 /**
@@ -564,6 +684,70 @@ function getMockProfitProxy(categoryKey, limit) {
       profit_rank: i + 1,
     };
   });
+}
+
+/**
+ * Агрегация данных по категориям (для реальных данных WB)
+ */
+function aggregateByCategory(data, period = 'mtd') {
+  const grouped = {};
+
+  for (const row of data) {
+    const categoryKey = mapCategory(row.category_wb);
+    if (categoryKey === 'other') continue;
+
+    if (!grouped[categoryKey]) {
+      grouped[categoryKey] = {
+        category_key: categoryKey,
+        category_name: CATEGORIES[categoryKey].name,
+        sort_order: CATEGORY_KEYS.indexOf(categoryKey) + 1,
+        orders: 0,
+        revenue: 0,
+        impressions: 0,
+        clicks: 0,
+        add_to_cart: 0,
+        profit: 0,
+        ads_spend: 0,
+        products: new Set(),
+      };
+    }
+
+    grouped[categoryKey].orders += row.orders || 0;
+    grouped[categoryKey].revenue += row.revenue_gross || 0;
+    grouped[categoryKey].impressions += row.impressions || 0;
+    grouped[categoryKey].clicks += row.clicks || 0;
+    grouped[categoryKey].add_to_cart += row.add_to_cart || 0;
+    grouped[categoryKey].profit += row.profit_incl_marketing || 0;
+    grouped[categoryKey].ads_spend += (row.drr_search || 0) + (row.drr_media || 0) + (row.drr_bloggers || 0) + (row.drr_others || 0);
+    if (row.sku) grouped[categoryKey].products.add(row.sku);
+  }
+
+  const suffix = period === 'today' ? '_today' : '_mtd';
+
+  return Object.values(grouped).map(g => ({
+    category_key: g.category_key,
+    category_name: g.category_name,
+    sort_order: g.sort_order,
+    [`fact_revenue${suffix}`]: g.revenue,
+    [`fact_units${suffix}`]: g.orders,
+    [`orders${suffix}`]: g.orders,
+    impressions: g.impressions,
+    clicks: g.clicks,
+    add_to_cart: g.add_to_cart,
+    profit: g.profit,
+    ads_spend: g.ads_spend,
+    products_count: g.products.size,
+    // Метрики
+    drr_pct: g.revenue > 0 ? Math.round(g.ads_spend / g.revenue * 1000) / 10 : 0,
+    ctr_pct: g.impressions > 0 ? Math.round(g.clicks / g.impressions * 10000) / 100 : 0,
+    cr_pct: g.clicks > 0 ? Math.round(g.orders / g.clicks * 10000) / 100 : 0,
+    margin_pct: g.revenue > 0 ? Math.round(g.profit / g.revenue * 1000) / 10 : 0,
+    // Для совместимости со старым форматом
+    revenue_completion_pct: 100,
+    revenue_deviation: 0,
+    mom_revenue_pct: null,
+    report_date: new Date().toISOString().split('T')[0],
+  })).sort((a, b) => a.sort_order - b.sort_order);
 }
 
 export default {
