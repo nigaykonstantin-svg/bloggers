@@ -23,6 +23,11 @@ const SYSTEM_PROMPT = `Ты — аналитик маркетплейса кос
  * Генерация ежедневного дайджеста
  */
 export async function generateDailyDigest(data) {
+  // Если нет Claude API — используем красивый fallback
+  if (!anthropic) {
+    return generateDailyDigestFallback(data);
+  }
+
   const { today, mtd, topProducts } = data;
 
   const prompt = `Сформируй Telegram-сообщение с ежедневным дайджестом продаж.
@@ -59,6 +64,11 @@ ${JSON.stringify(topProducts, null, 2)}
  * Генерация отчёта по категории
  */
 export async function generateCategoryReport(categoryData, categoryInfo) {
+  // Если нет Claude API — используем красивый fallback
+  if (!anthropic) {
+    return generateCategoryReportFallback(categoryData, categoryInfo);
+  }
+
   const { categoryMtd, growthCandidates, priceStability, profitTop } = categoryData;
 
   // Группируем кандидаты на рост по категориям
@@ -108,6 +118,11 @@ ${JSON.stringify(profitTop, null, 2)}
  * Генерация отчёта топ-10 товаров
  */
 export async function generateTop10Report(products, categoryInfo, momData) {
+  // Если нет Claude API — используем красивый fallback
+  if (!anthropic) {
+    return generateTop10Fallback(products, categoryInfo);
+  }
+
   const prompt = `Сформируй Telegram-сообщение с топ-10 товаров категории "${categoryInfo.name}".
 
 <data>
@@ -137,6 +152,11 @@ ${JSON.stringify(momData, null, 2)}
  * Генерация анализа топ-20 с потенциалом роста
  */
 export async function generateTop20GrowthReport(growthCandidates, categoryInfo) {
+  // Если нет Claude API — используем красивый fallback
+  if (!anthropic) {
+    return generateTop20GrowthFallback(growthCandidates, categoryInfo);
+  }
+
   const quickWins = growthCandidates.filter(p => p.growth_category === 'quick_win');
   const needsBoost = growthCandidates.filter(p => p.growth_category === 'needs_boost');
   const risky = growthCandidates.filter(p => p.growth_category === 'risky');
@@ -181,6 +201,11 @@ ${JSON.stringify(stable.slice(0, 5), null, 2)}
  * Генерация отчёта по подкатегориям
  */
 export async function generateDrillDownReport(subcategories, categoryInfo) {
+  // Если нет Claude API — используем красивый fallback
+  if (!anthropic) {
+    return generateDrillDownFallback(subcategories, categoryInfo);
+  }
+
   const prompt = `Сформируй Telegram-сообщение с разбивкой по подкатегориям для "${categoryInfo.name}".
 
 <data>
@@ -231,31 +256,182 @@ async function callClaude(userPrompt) {
 }
 
 /**
- * Fallback ответ когда Claude недоступен
+ * Форматирование числа в K/M формат
  */
-function generateFallbackResponse(prompt) {
-  // Простой парсинг данных из промпта для генерации базового ответа
-  if (prompt.includes('ежедневным дайджестом')) {
-    return `📊 *Ежедневный дайджест продаж*\n\n_Claude API не настроен. Отображаем сырые данные._\n\nДля полноценных отчётов настройте ANTHROPIC_API_KEY в .env`;
-  }
+function formatMoney(num) {
+  if (!num || num === 0) return '0 ₽';
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M ₽`;
+  if (num >= 1000) return `${(num / 1000).toFixed(0)}K ₽`;
+  return `${num.toFixed(0)} ₽`;
+}
 
-  if (prompt.includes('детальное Telegram-сообщение')) {
-    return `📋 *Отчёт по категории*\n\n_Claude API не настроен._\n\nДанные доступны, но для форматированных отчётов нужен API ключ.`;
-  }
+/**
+ * Форматирование даты
+ */
+function formatDateRu(date) {
+  const d = new Date(date);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
 
-  if (prompt.includes('топ-10')) {
-    return `🏆 *Топ-10 товаров*\n\n_Claude API не настроен._\n\nНастройте ANTHROPIC_API_KEY для детального анализа.`;
-  }
-
-  if (prompt.includes('потенциалом роста')) {
-    return `📈 *Анализ потенциала роста*\n\n_Claude API не настроен._\n\nДля AI-анализа настройте ANTHROPIC_API_KEY.`;
-  }
-
-  if (prompt.includes('подкатегориям')) {
-    return `📂 *Подкатегории*\n\n_Claude API не настроен._\n\nНастройте ANTHROPIC_API_KEY для форматированных отчётов.`;
-  }
-
+/**
+ * Fallback ответ когда Claude недоступен — с реальными данными
+ */
+function generateFallbackResponse(prompt, data) {
   return `⚠️ Claude API не настроен.\n\nДобавьте ANTHROPIC_API_KEY в файл .env для генерации отчётов.`;
+}
+
+/**
+ * Генерация дайджеста без Claude — с реальными данными
+ */
+export function generateDailyDigestFallback(data) {
+  const { today, mtd, topProducts } = data;
+  const date = formatDateRu(new Date());
+
+  let report = `📊 *Дайджест ${date}*\n`;
+  report += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  let totalRevenue = 0;
+  let totalOrders = 0;
+
+  const categoryEmojis = {
+    face: '👤',
+    hair: '💇',
+    body: '🧴',
+    makeup: '💄'
+  };
+
+  const categoryNames = {
+    face: 'ЛИЦО',
+    hair: 'ВОЛОСЫ',
+    body: 'ТЕЛО',
+    makeup: 'МАКИЯЖ'
+  };
+
+  for (const cat of mtd) {
+    const emoji = categoryEmojis[cat.category_key] || '📦';
+    const name = categoryNames[cat.category_key] || cat.category_name;
+    const revenue = cat.fact_revenue_mtd || cat.revenue || 0;
+    const orders = cat.fact_units_mtd || cat.orders_mtd || cat.orders || 0;
+    const drr = cat.drr_pct || 0;
+    const skuCount = cat.products_count || 0;
+
+    totalRevenue += revenue;
+    totalOrders += orders;
+
+    report += `${emoji} *${name}*\n`;
+    report += `├ Выручка: ${formatMoney(revenue)}\n`;
+    report += `├ Заказы: ${orders.toLocaleString('ru-RU')} шт\n`;
+    report += `├ DRR: ${drr.toFixed(1)}%\n`;
+    report += `└ SKU: ${skuCount}\n\n`;
+  }
+
+  report += `━━━━━━━━━━━━━━━━━━━━\n`;
+  report += `📈 *Итого MTD:* ${formatMoney(totalRevenue)}\n`;
+  report += `📦 *Заказов:* ${totalOrders.toLocaleString('ru-RU')} шт`;
+
+  return report;
+}
+
+/**
+ * Генерация отчёта по категории без Claude
+ */
+export function generateCategoryReportFallback(categoryData, categoryInfo) {
+  const { categoryMtd } = categoryData;
+
+  let report = `${categoryInfo.emoji} *${categoryInfo.name.toUpperCase()}*\n`;
+  report += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  if (categoryMtd) {
+    const revenue = categoryMtd.fact_revenue_mtd || categoryMtd.revenue || 0;
+    const orders = categoryMtd.fact_units_mtd || categoryMtd.orders || 0;
+    const drr = categoryMtd.drr_pct || 0;
+    const ctr = categoryMtd.ctr_pct || 0;
+    const cr = categoryMtd.cr_pct || 0;
+
+    report += `*Показатели MTD:*\n`;
+    report += `├ Выручка: ${formatMoney(revenue)}\n`;
+    report += `├ Заказы: ${orders.toLocaleString('ru-RU')} шт\n`;
+    report += `├ DRR: ${drr.toFixed(1)}%\n`;
+    report += `├ CTR: ${ctr.toFixed(2)}%\n`;
+    report += `└ CR: ${cr.toFixed(2)}%\n`;
+  } else {
+    report += `_Данные не найдены_\n`;
+  }
+
+  return report;
+}
+
+/**
+ * Генерация топ-10 без Claude
+ */
+export function generateTop10Fallback(products, categoryInfo) {
+  let report = `🏆 *Топ-10 ${categoryInfo.name}*\n`;
+  report += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  if (!products || products.length === 0) {
+    return report + `_Нет данных_`;
+  }
+
+  products.slice(0, 10).forEach((p, i) => {
+    const name = p.title ? p.title.slice(0, 25) : `SKU ${p.sku}`;
+    report += `*${i + 1}.* ${name}\n`;
+    report += `   ${formatMoney(p.revenue_mtd)} | ${p.units_mtd || 0} шт | DRR ${(p.drr_pct || 0).toFixed(1)}%\n\n`;
+  });
+
+  return report;
+}
+
+/**
+ * Генерация топ-20 роста без Claude
+ */
+export function generateTop20GrowthFallback(candidates, categoryInfo) {
+  let report = `📈 *Топ-20 потенциал роста — ${categoryInfo.name}*\n`;
+  report += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  if (!candidates || candidates.length === 0) {
+    return report + `_Нет данных_`;
+  }
+
+  const quickWins = candidates.filter(p => p.growth_category === 'quick_win');
+  const needsBoost = candidates.filter(p => p.growth_category === 'needs_boost');
+
+  if (quickWins.length > 0) {
+    report += `🔥 *Быстрые победы:*\n`;
+    quickWins.slice(0, 5).forEach(p => {
+      const name = p.title ? p.title.slice(0, 20) : `SKU ${p.sku}`;
+      report += `• ${name} — ${formatMoney(p.revenue_mtd)}\n`;
+    });
+    report += `\n`;
+  }
+
+  if (needsBoost.length > 0) {
+    report += `🚀 *Нужно разогнать:*\n`;
+    needsBoost.slice(0, 5).forEach(p => {
+      const name = p.title ? p.title.slice(0, 20) : `SKU ${p.sku}`;
+      report += `• ${name} — ${formatMoney(p.revenue_mtd)}\n`;
+    });
+  }
+
+  return report;
+}
+
+/**
+ * Генерация подкатегорий без Claude
+ */
+export function generateDrillDownFallback(subcategories, categoryInfo) {
+  let report = `📂 *${categoryInfo.name} — подкатегории*\n`;
+  report += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  if (!subcategories || subcategories.length === 0) {
+    return report + `_Нет данных_`;
+  }
+
+  subcategories.slice(0, 10).forEach((sub, i) => {
+    report += `*${i + 1}.* ${sub.subcategory}\n`;
+    report += `   ${formatMoney(sub.fact_revenue_mtd)} | ${sub.fact_units_mtd || 0} шт\n\n`;
+  });
+
+  return report;
 }
 
 export default {
