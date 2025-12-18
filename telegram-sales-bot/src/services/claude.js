@@ -299,7 +299,7 @@ function generateFallbackResponse(prompt, data) {
 }
 
 /**
- * Генерация дайджеста без Claude — с реальными данными
+ * Генерация дайджеста без Claude — с реальными данными и рекомендациями
  */
 export function generateDailyDigestFallback(data) {
   const { today, mtd, topProducts, period } = data;
@@ -352,14 +352,102 @@ export function generateDailyDigestFallback(data) {
     report += `├ Выручка: ${formatMoney(revenue)}\n`;
     report += `├ Заказы: ${orders.toLocaleString('ru-RU')} шт\n`;
     report += `├ DRR: ${drr.toFixed(1)}%\n`;
-    report += `└ SKU: ${skuCount}\n\n`;
+    report += `└ SKU: ${skuCount}\n`;
+
+    // Топ-3 товара
+    const tops = topProducts?.[cat.category_key] || [];
+    if (tops.length > 0) {
+      report += `\n🔥 *Топ-3:*\n`;
+      tops.slice(0, 3).forEach((p, i) => {
+        const pName = p.title ? p.title.slice(0, 30) : `SKU ${p.sku}`;
+        report += `${i + 1}. ${pName} — ${formatMoney(p.revenue_mtd)}\n`;
+      });
+    }
+
+    // Аналитика и рекомендации для каждой категории
+    const insight = getCategoryInsight(cat, tops);
+    if (insight.good) {
+      report += `\n✅ ${insight.good}\n`;
+    }
+    if (insight.attention) {
+      report += `⚠️ ${insight.attention}\n`;
+    }
+
+    report += `\n---\n\n`;
   }
 
-  report += `━━━━━━━━━━━━━━━━━━━━\n`;
-  report += `📈 *Итого MTD:* ${formatMoney(totalRevenue)}\n`;
+  report += `📈 *ИТОГО:* ${formatMoney(totalRevenue)}\n`;
   report += `📦 *Заказов:* ${totalOrders.toLocaleString('ru-RU')} шт`;
 
   return report;
+}
+
+/**
+ * Генерация инсайтов для категории
+ */
+function getCategoryInsight(category, topProducts) {
+  const drr = category.drr_pct || 0;
+  const revenue = category.fact_revenue_mtd || category.revenue || 0;
+  const orders = category.fact_units_mtd || category.orders || 0;
+  const avgCheck = orders > 0 ? Math.round(revenue / orders) : 0;
+
+  const insights = {
+    good: null,
+    attention: null
+  };
+
+  // Анализ DRR
+  if (drr < 8) {
+    insights.good = `Отличный DRR ${drr.toFixed(1)}% — эффективная реклама`;
+  } else if (drr > 12) {
+    insights.attention = `Высокий DRR ${drr.toFixed(1)}% — проверьте эффективность рекламы`;
+  }
+
+  // Анализ топ товаров
+  if (topProducts && topProducts.length > 0) {
+    const topDRR = topProducts[0]?.drr_pct || 0;
+    const topRevenue = topProducts[0]?.revenue_mtd || 0;
+
+    if (!insights.good && topRevenue > revenue * 0.15) {
+      insights.good = `Топ-1 товар даёт ${Math.round(topRevenue / revenue * 100)}% выручки`;
+    }
+
+    if (!insights.attention && topDRR > 15) {
+      insights.attention = `У топ-товара высокий DRR ${topDRR.toFixed(1)}% — можно оптимизировать`;
+    }
+  }
+
+  // Анализ среднего чека
+  if (!insights.good && avgCheck > 1000) {
+    insights.good = `Высокий средний чек: ${formatMoney(avgCheck)}`;
+  }
+
+  if (!insights.attention && avgCheck < 500 && orders > 100) {
+    insights.attention = `Низкий средний чек ${formatMoney(avgCheck)} — рассмотрите апсейл`;
+  }
+
+  // Фоллбэк инсайты по категориям
+  if (!insights.good) {
+    const fallbackGood = {
+      face: 'Стабильный спрос на уходовую косметику',
+      hair: 'Регулярные покупки средств для волос',
+      body: 'Хороший оборот по уходу за телом',
+      makeup: 'Активные продажи декоративной косметики'
+    };
+    insights.good = fallbackGood[category.category_key] || 'Продажи в норме';
+  }
+
+  if (!insights.attention) {
+    const fallbackAttention = {
+      face: 'Следите за сезонностью кремов',
+      hair: 'Проверьте остатки популярных шампуней',
+      body: 'Контролируйте маржинальность скрабов',
+      makeup: 'Обновите ассортимент по трендам'
+    };
+    insights.attention = fallbackAttention[category.category_key] || 'Мониторьте конкурентов';
+  }
+
+  return insights;
 }
 
 /**
