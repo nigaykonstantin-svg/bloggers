@@ -222,28 +222,28 @@ export async function getSubcategoriesMTD(categoryKey) {
 /**
  * Получить топ-N товаров по категории (из реальной таблицы WB)
  */
-export async function getTopProductsByCategory(categoryKey, limit = 10) {
-  const cacheKey = `top_products_${categoryKey}_${limit}`;
+export async function getTopProductsByCategory(categoryKey, limit = 10, period = 'mtd') {
+  const cacheKey = `top_products_${categoryKey}_${limit}_${period}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
   if (!supabase) {
-    return getMockTopProducts(categoryKey, limit);
+    return getMockTopProducts(categoryKey, limit, period);
   }
 
   const wbCategories = getWbCategories(categoryKey);
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  const { startDate, endDate } = await getPeriodDates(period);
 
   const { data, error } = await supabase
     .from(WB_TABLE)
     .select('sku, product_name_1c, subcategory_wb, orders, revenue_gross, DRR_search, DRR_media, DRR_bloggers, DRR_others, price, stock_units')
     .in('category_wb', wbCategories)
-    .gte('date', monthStart);
+    .gte('date', startDate)
+    .lte('date', endDate);
 
   if (error) {
     console.error('Error fetching top products:', error);
-    return getMockTopProducts(categoryKey, limit);
+    return getMockTopProducts(categoryKey, limit, period);
   }
 
   // Агрегируем по SKU
@@ -440,8 +440,12 @@ function getPeriodDates(period = 'mtd') {
  * Получить данные по категориям за период
  */
 async function getCategoryDataForPeriod(period = 'mtd') {
+  const cacheKey = `category_data_period_${period}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
+
   if (!supabase) {
-    return getMockCategoryPlanFactMTD();
+    return getMockCategoryDataForPeriod(period);
   }
 
   const { startDate, endDate } = await getPeriodDates(period);
@@ -454,10 +458,12 @@ async function getCategoryDataForPeriod(period = 'mtd') {
 
   if (error) {
     console.error('Error fetching period data:', error);
-    return getMockCategoryPlanFactMTD();
+    return getMockCategoryDataForPeriod(period);
   }
 
-  return aggregateByCategory(data, 'mtd', endDate);
+  const result = aggregateByCategory(data, 'mtd', endDate);
+  setCache(cacheKey, result);
+  return result;
 }
 
 /**
@@ -469,10 +475,10 @@ export async function getDailyDigestData(period = 'mtd') {
     getCategoryDataForPeriod(period),
   ]);
 
-  // Получаем топ-3 для каждой категории
+  // Получаем топ-3 для каждой категории ЗА ВЫБРАННЫЙ ПЕРИОД
   const topProducts = {};
   for (const key of CATEGORY_KEYS) {
-    topProducts[key] = await getTopProductsByCategory(key, 3);
+    topProducts[key] = await getTopProductsByCategory(key, 3, period);
   }
 
   return { today, mtd, topProducts, period };
@@ -630,6 +636,85 @@ function getMockCategoryPlanFactMTD() {
   ];
 }
 
+/**
+ * Mock данные для разных периодов
+ */
+function getMockCategoryDataForPeriod(period = 'mtd') {
+  const today = new Date();
+
+  // Множитель для разных периодов
+  const multipliers = {
+    yesterday: 1,
+    '7days': 7,
+    mtd: today.getDate(),
+    '30days': 30,
+  };
+
+  const mult = multipliers[period] || today.getDate();
+
+  // Базовые дневные значения
+  const baseData = {
+    face: { revenue: 387500, orders: 485 },
+    hair: { revenue: 412300, orders: 688 },
+    body: { revenue: 298700, orders: 665 },
+    makeup: { revenue: 301200, orders: 518 },
+  };
+
+  const periodNames = {
+    yesterday: 'день',
+    '7days': '7 дней',
+    mtd: 'MTD',
+    '30days': '30 дней',
+  };
+
+  return [
+    {
+      category_key: 'face',
+      category_name: 'Лицо',
+      sort_order: 1,
+      fact_revenue_mtd: Math.round(baseData.face.revenue * mult),
+      fact_units_mtd: Math.round(baseData.face.orders * mult),
+      orders_mtd: Math.round(baseData.face.orders * mult),
+      products_count: 45,
+      drr_pct: 8.2,
+      report_date: today.toISOString().split('T')[0],
+    },
+    {
+      category_key: 'hair',
+      category_name: 'Волосы',
+      sort_order: 2,
+      fact_revenue_mtd: Math.round(baseData.hair.revenue * mult),
+      fact_units_mtd: Math.round(baseData.hair.orders * mult),
+      orders_mtd: Math.round(baseData.hair.orders * mult),
+      products_count: 52,
+      drr_pct: 7.5,
+      report_date: today.toISOString().split('T')[0],
+    },
+    {
+      category_key: 'body',
+      category_name: 'Тело',
+      sort_order: 3,
+      fact_revenue_mtd: Math.round(baseData.body.revenue * mult),
+      fact_units_mtd: Math.round(baseData.body.orders * mult),
+      orders_mtd: Math.round(baseData.body.orders * mult),
+      products_count: 38,
+      drr_pct: 14.2,
+      report_date: today.toISOString().split('T')[0],
+    },
+    {
+      category_key: 'makeup',
+      category_name: 'Макияж',
+      sort_order: 4,
+      fact_revenue_mtd: Math.round(baseData.makeup.revenue * mult),
+      fact_units_mtd: Math.round(baseData.makeup.orders * mult),
+      orders_mtd: Math.round(baseData.makeup.orders * mult),
+      products_count: 41,
+      drr_pct: 9.8,
+      report_date: today.toISOString().split('T')[0],
+    },
+  ];
+}
+
 function getMockSubcategoriesMTD(categoryKey) {
   const subcats = {
     face: [
@@ -665,7 +750,19 @@ function getMockSubcategoriesMTD(categoryKey) {
   }));
 }
 
-function getMockTopProducts(categoryKey, limit) {
+function getMockTopProducts(categoryKey, limit, period = 'mtd') {
+  const today = new Date();
+
+  // Множитель для разных периодов (базовые данные - за месяц)
+  const periodMultipliers = {
+    yesterday: 1 / 30,
+    '7days': 7 / 30,
+    mtd: today.getDate() / 30,
+    '30days': 1,
+  };
+
+  const mult = periodMultipliers[period] || 1;
+
   const products = {
     face: [
       { sku: 'FS001', title: 'Сыворотка витамин С 15% 30мл', revenue_mtd: 567000, units_mtd: 300, drr_pct: 8.2, margin_percent: 69 },
@@ -699,10 +796,12 @@ function getMockTopProducts(categoryKey, limit) {
 
   return (products[categoryKey] || []).slice(0, limit).map((p, i) => ({
     ...p,
+    revenue_mtd: Math.round(p.revenue_mtd * mult),
+    units_mtd: Math.round(p.units_mtd * mult),
     category_key: categoryKey,
     category_name: CATEGORIES[categoryKey].name,
     rank_in_category: i + 1,
-    ads_spend_mtd: Math.round(p.revenue_mtd * p.drr_pct / 100),
+    ads_spend_mtd: Math.round(p.revenue_mtd * mult * p.drr_pct / 100),
   }));
 }
 
