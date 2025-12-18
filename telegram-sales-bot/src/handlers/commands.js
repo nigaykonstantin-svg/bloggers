@@ -68,13 +68,42 @@ export async function handleHelp(ctx) {
 }
 
 /**
- * /daily - Ежедневный дайджест
+ * /daily - Ежедневный дайджест (показать выбор периода)
  */
 export async function handleDaily(ctx) {
-  await ctx.reply('⏳ Формирую ежедневный дайджест...');
+  await ctx.reply(
+    '📊 *Дайджест продаж*\n\nВыберите период:',
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📅 Вчера', 'period_yesterday'),
+          Markup.button.callback('📆 7 дней', 'period_7days'),
+        ],
+        [
+          Markup.button.callback('📆 Месяц (MTD)', 'period_mtd'),
+          Markup.button.callback('📆 30 дней', 'period_30days'),
+        ],
+      ])
+    }
+  );
+}
+
+/**
+ * Показать дайджест за выбранный период
+ */
+async function showDigestForPeriod(ctx, period) {
+  const periodNames = {
+    yesterday: 'за вчера',
+    '7days': 'за 7 дней',
+    mtd: 'за месяц (MTD)',
+    '30days': 'за 30 дней',
+  };
+
+  await ctx.reply(`⏳ Формирую дайджест ${periodNames[period] || ''}...`);
 
   try {
-    const data = await supabaseService.getDailyDigestData();
+    const data = await supabaseService.getDailyDigestData(period);
     const report = await claudeService.generateDailyDigest(data);
 
     // Разбиваем на части если слишком длинное
@@ -96,11 +125,14 @@ export async function handleDaily(ctx) {
           Markup.button.callback('🧴 Тело', 'category_body'),
           Markup.button.callback('💄 Макияж', 'category_makeup'),
         ],
-        [Markup.button.callback('🔄 Обновить', 'refresh_daily')],
+        [
+          Markup.button.callback('📅 Другой период', 'show_periods'),
+          Markup.button.callback('🔄 Обновить', `refresh_period_${period}`),
+        ],
       ])
     );
   } catch (error) {
-    console.error('Error in handleDaily:', error);
+    console.error('Error in showDigestForPeriod:', error);
     await ctx.reply('❌ Ошибка при формировании отчёта. Попробуйте позже.');
   }
 }
@@ -540,6 +572,29 @@ export async function handleCallback(ctx) {
   const [action, ...params] = callbackData.split('_');
 
   switch (action) {
+    case 'period':
+      // period_yesterday, period_7days, period_mtd, period_30days
+      await showDigestForPeriod(ctx, params[0]);
+      break;
+
+    case 'show':
+      if (params[0] === 'periods') {
+        await handleDaily(ctx);
+      } else if (params[0] === 'tables') {
+        ctx.message = { text: '/tables' };
+        await handleTables(ctx);
+      }
+      break;
+
+    case 'refresh':
+      if (params[0] === 'daily') {
+        await handleDaily(ctx);
+      } else if (params[0] === 'period') {
+        // refresh_period_mtd -> period = params[1]
+        await showDigestForPeriod(ctx, params[1]);
+      }
+      break;
+
     case 'category':
       await handleCategoryReport(ctx, params[0]);
       break;
@@ -556,12 +611,6 @@ export async function handleCallback(ctx) {
       await showDrillDown(ctx, params[0]);
       break;
 
-    case 'refresh':
-      if (params[0] === 'daily') {
-        await handleDaily(ctx);
-      }
-      break;
-
     case 'back':
       if (params[0] === 'to' && params[1] === 'daily') {
         await handleDaily(ctx);
@@ -576,13 +625,6 @@ export async function handleCallback(ctx) {
     case 'sample':
       ctx.message = { text: `/sample ${params[0]}` };
       await handleSample(ctx);
-      break;
-
-    case 'show':
-      if (params[0] === 'tables') {
-        ctx.message = { text: '/tables' };
-        await handleTables(ctx);
-      }
       break;
 
     default:

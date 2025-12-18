@@ -28,7 +28,7 @@ export async function generateDailyDigest(data) {
     return generateDailyDigestFallback(data);
   }
 
-  const { today, mtd, topProducts } = data;
+  const { today, mtd, topProducts, period } = data;
 
   // Получаем дату из данных (последняя доступная дата в базе)
   const reportDate = mtd?.[0]?.report_date || today?.[0]?.report_date;
@@ -41,11 +41,18 @@ export async function generateDailyDigest(data) {
   };
 
   const formattedDate = formatDate(reportDate);
-  const monthStart = reportDate ? `01.${reportDate.split('-')[1]}` : '01.12';
-  const monthEnd = reportDate ? `${reportDate.split('-')[2]}.${reportDate.split('-')[1]}` : formattedDate;
+
+  // Названия периодов
+  const periodNames = {
+    yesterday: 'за день',
+    '7days': 'за 7 дней',
+    mtd: 'MTD',
+    '30days': 'за 30 дней',
+  };
+  const periodLabel = periodNames[period] || 'MTD';
 
   // Заголовок формируем В КОДЕ, не даём Claude его менять
-  const header = `📊 *Дайджест продаж ${formattedDate}*\nMTD: ${monthStart} - ${monthEnd}\n\n---\n\n`;
+  const header = `📊 *Дайджест продаж ${periodLabel}*\n📅 Данные на: ${formattedDate}\n\n---\n\n`;
 
   const prompt = `Продолжи Telegram-сообщение с дайджестом продаж. Заголовок УЖЕ ЕСТЬ, НЕ ДОБАВЛЯЙ заголовок с датой!
 
@@ -295,12 +302,22 @@ function generateFallbackResponse(prompt, data) {
  * Генерация дайджеста без Claude — с реальными данными
  */
 export function generateDailyDigestFallback(data) {
-  const { today, mtd, topProducts } = data;
+  const { today, mtd, topProducts, period } = data;
   // Берём дату из данных, а не текущую дату
   const dataDate = mtd?.[0]?.report_date || today?.[0]?.report_date || new Date().toISOString().split('T')[0];
   const date = formatDateRu(dataDate);
 
-  let report = `📊 *Дайджест на ${date}*\n`;
+  // Названия периодов
+  const periodNames = {
+    yesterday: 'за день',
+    '7days': 'за 7 дней',
+    mtd: 'MTD',
+    '30days': 'за 30 дней',
+  };
+  const periodLabel = periodNames[period] || 'MTD';
+
+  let report = `📊 *Дайджест продаж ${periodLabel}*\n`;
+  report += `📅 Данные на: ${date}\n`;
   report += `━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   let totalRevenue = 0;

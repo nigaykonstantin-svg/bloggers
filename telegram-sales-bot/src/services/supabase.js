@@ -401,12 +401,72 @@ export async function getProfitProxy(categoryKey, limit = 5) {
 }
 
 /**
+ * Вычислить даты для периода
+ */
+function getPeriodDates(period = 'mtd') {
+  const latestDatePromise = getLatestDate();
+
+  return latestDatePromise.then(latestDate => {
+    const latest = new Date(latestDate);
+    let startDate;
+
+    switch (period) {
+      case 'yesterday':
+        // Один день (последний доступный)
+        startDate = latestDate;
+        break;
+      case '7days':
+        startDate = new Date(latest);
+        startDate.setDate(startDate.getDate() - 6);
+        startDate = startDate.toISOString().split('T')[0];
+        break;
+      case '30days':
+        startDate = new Date(latest);
+        startDate.setDate(startDate.getDate() - 29);
+        startDate = startDate.toISOString().split('T')[0];
+        break;
+      case 'mtd':
+      default:
+        // С начала месяца
+        startDate = new Date(latest.getFullYear(), latest.getMonth(), 1).toISOString().split('T')[0];
+        break;
+    }
+
+    return { startDate, endDate: latestDate };
+  });
+}
+
+/**
+ * Получить данные по категориям за период
+ */
+async function getCategoryDataForPeriod(period = 'mtd') {
+  if (!supabase) {
+    return getMockCategoryPlanFactMTD();
+  }
+
+  const { startDate, endDate } = await getPeriodDates(period);
+
+  const { data, error } = await supabase
+    .from(WB_TABLE)
+    .select('category_wb, orders, revenue_gross, drr_search, drr_media, drr_bloggers, drr_others, sku')
+    .gte('date', startDate)
+    .lte('date', endDate);
+
+  if (error) {
+    console.error('Error fetching period data:', error);
+    return getMockCategoryPlanFactMTD();
+  }
+
+  return aggregateByCategory(data, 'mtd', endDate);
+}
+
+/**
  * Получить все данные для дайджеста
  */
-export async function getDailyDigestData() {
+export async function getDailyDigestData(period = 'mtd') {
   const [today, mtd] = await Promise.all([
     getCategoryPlanFactToday(),
-    getCategoryPlanFactMTD(),
+    getCategoryDataForPeriod(period),
   ]);
 
   // Получаем топ-3 для каждой категории
@@ -415,7 +475,7 @@ export async function getDailyDigestData() {
     topProducts[key] = await getTopProductsByCategory(key, 3);
   }
 
-  return { today, mtd, topProducts };
+  return { today, mtd, topProducts, period };
 }
 
 /**
