@@ -30,13 +30,19 @@ export async function generateDailyDigest(data) {
 
   const { today, mtd, topProducts } = data;
 
+  // Получаем дату из данных (последняя доступная дата в базе)
+  const reportDate = mtd?.[0]?.report_date || today?.[0]?.report_date || 'дата неизвестна';
+
   const prompt = `Сформируй Telegram-сообщение с ежедневным дайджестом продаж.
 
+ВАЖНО: Используй ТОЛЬКО дату из данных: ${reportDate}. НЕ используй текущую дату!
+
 <data>
-Данные на сегодня (${today[0]?.report_date || 'текущая дата'}):
+Дата отчёта: ${reportDate}
+Данные на последний день (${reportDate}):
 ${JSON.stringify(today, null, 2)}
 
-Данные MTD (с начала месяца):
+Данные MTD (с начала месяца по ${reportDate}):
 ${JSON.stringify(mtd, null, 2)}
 
 Топ-3 товара по каждой категории:
@@ -45,7 +51,7 @@ ${JSON.stringify(topProducts, null, 2)}
 
 <formatting>
 Структура сообщения:
-1. Заголовок с датой и периодом MTD
+1. Заголовок с датой ${reportDate} и периодом MTD
 2. По каждой категории (Лицо, Волосы, Тело, Макияж):
    - Сегодня: План/Факт (выполнение %, отклонение)
    - MTD: План/Факт (выполнение %, MoM %)
@@ -285,9 +291,11 @@ function generateFallbackResponse(prompt, data) {
  */
 export function generateDailyDigestFallback(data) {
   const { today, mtd, topProducts } = data;
-  const date = formatDateRu(new Date());
+  // Берём дату из данных, а не текущую дату
+  const dataDate = mtd?.[0]?.report_date || today?.[0]?.report_date || new Date().toISOString().split('T')[0];
+  const date = formatDateRu(dataDate);
 
-  let report = `📊 *Дайджест ${date}*\n`;
+  let report = `📊 *Дайджест на ${date}*\n`;
   report += `━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   let totalRevenue = 0;

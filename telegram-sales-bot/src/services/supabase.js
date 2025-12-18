@@ -119,7 +119,7 @@ export async function getCategoryPlanFactToday() {
   }
 
   // Агрегируем по категориям
-  const result = aggregateByCategory(data, 'today');
+  const result = aggregateByCategory(data, 'today', latestDate);
   setCache(cacheKey, result);
   return result;
 }
@@ -152,7 +152,7 @@ export async function getCategoryPlanFactMTD() {
     return getMockCategoryPlanFactMTD();
   }
 
-  const result = aggregateByCategory(data, 'mtd');
+  const result = aggregateByCategory(data, 'mtd', latestDate);
   setCache(cacheKey, result);
   return result;
 }
@@ -711,7 +711,7 @@ function getMockProfitProxy(categoryKey, limit) {
 /**
  * Агрегация данных по категориям (для реальных данных WB)
  */
-function aggregateByCategory(data, period = 'mtd') {
+function aggregateByCategory(data, period = 'mtd', reportDate = null) {
   const grouped = {};
 
   for (const row of data) {
@@ -769,7 +769,7 @@ function aggregateByCategory(data, period = 'mtd') {
     revenue_completion_pct: 100,
     revenue_deviation: 0,
     mom_revenue_pct: null,
-    report_date: new Date().toISOString().split('T')[0],
+    report_date: reportDate || new Date().toISOString().split('T')[0],
   })).sort((a, b) => a.sort_order - b.sort_order);
 }
 
