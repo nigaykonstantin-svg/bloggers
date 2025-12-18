@@ -110,7 +110,7 @@ export async function getCategoryPlanFactToday() {
 
   const { data, error } = await supabase
     .from(WB_TABLE)
-    .select('category_wb, orders, revenue_gross, impressions, clicks, add_to_cart, drr_search, drr_media, drr_bloggers, drr_others, sku')
+    .select('category_wb, orders, revenue_gross, drr_search, drr_media, drr_bloggers, drr_others, sku')
     .eq('date', latestDate);
 
   if (error) {
@@ -143,7 +143,7 @@ export async function getCategoryPlanFactMTD() {
 
   const { data, error } = await supabase
     .from(WB_TABLE)
-    .select('category_wb, orders, revenue_gross, impressions, clicks, add_to_cart, drr_search, drr_media, drr_bloggers, drr_others, sku')
+    .select('category_wb, orders, revenue_gross, drr_search, drr_media, drr_bloggers, drr_others, sku')
     .gte('date', monthStart)
     .lte('date', latestDate);
 
@@ -237,7 +237,7 @@ export async function getTopProductsByCategory(categoryKey, limit = 10) {
 
   const { data, error } = await supabase
     .from(WB_TABLE)
-    .select('sku, product_name_1c, subcategory_wb, orders, revenue_gross, impressions, clicks, drr_search, drr_media, drr_bloggers, drr_others, price, stock_units')
+    .select('sku, product_name_1c, subcategory_wb, orders, revenue_gross, drr_search, drr_media, drr_bloggers, drr_others, price, stock_units')
     .in('category_wb', wbCategories)
     .gte('date', monthStart);
 
@@ -259,8 +259,6 @@ export async function getTopProductsByCategory(categoryKey, limit = 10) {
         units_mtd: 0,
         revenue_mtd: 0,
         profit_mtd: 0,
-        impressions_mtd: 0,
-        clicks_mtd: 0,
         ads_spend_mtd: 0,
         prices: [],
         stocks: [],
@@ -270,8 +268,6 @@ export async function getTopProductsByCategory(categoryKey, limit = 10) {
     grouped[row.sku].revenue_mtd += row.revenue_gross || 0;
     // profit_mtd calculated as estimate (revenue - ads)
     grouped[row.sku].profit_mtd += 0;
-    grouped[row.sku].impressions_mtd += row.impressions || 0;
-    grouped[row.sku].clicks_mtd += row.clicks || 0;
     grouped[row.sku].ads_spend_mtd += (row.drr_search || 0) + (row.drr_media || 0) + (row.drr_bloggers || 0) + (row.drr_others || 0);
     if (row.price) grouped[row.sku].prices.push(row.price);
     if (row.stock_units) grouped[row.sku].stocks.push(row.stock_units);
@@ -725,9 +721,6 @@ function aggregateByCategory(data, period = 'mtd', reportDate = null) {
         sort_order: CATEGORY_KEYS.indexOf(categoryKey) + 1,
         orders: 0,
         revenue: 0,
-        impressions: 0,
-        clicks: 0,
-        add_to_cart: 0,
         profit: 0,
         ads_spend: 0,
         products: new Set(),
@@ -736,9 +729,6 @@ function aggregateByCategory(data, period = 'mtd', reportDate = null) {
 
     grouped[categoryKey].orders += row.orders || 0;
     grouped[categoryKey].revenue += row.revenue_gross || 0;
-    grouped[categoryKey].impressions += row.impressions || 0;
-    grouped[categoryKey].clicks += row.clicks || 0;
-    grouped[categoryKey].add_to_cart += row.add_to_cart || 0;
     // profit calculated as revenue - ads_spend estimate
     grouped[categoryKey].profit += 0;
     grouped[categoryKey].ads_spend += (row.drr_search || 0) + (row.drr_media || 0) + (row.drr_bloggers || 0) + (row.drr_others || 0);
@@ -754,16 +744,11 @@ function aggregateByCategory(data, period = 'mtd', reportDate = null) {
     [`fact_revenue${suffix}`]: g.revenue,
     [`fact_units${suffix}`]: g.orders,
     [`orders${suffix}`]: g.orders,
-    impressions: g.impressions,
-    clicks: g.clicks,
-    add_to_cart: g.add_to_cart,
     profit: g.profit,
     ads_spend: g.ads_spend,
     products_count: g.products.size,
     // Метрики
     drr_pct: g.revenue > 0 ? Math.round(g.ads_spend / g.revenue * 1000) / 10 : 0,
-    ctr_pct: g.impressions > 0 ? Math.round(g.clicks / g.impressions * 10000) / 100 : 0,
-    cr_pct: g.clicks > 0 ? Math.round(g.orders / g.clicks * 10000) / 100 : 0,
     margin_pct: g.revenue > 0 ? Math.round(g.profit / g.revenue * 1000) / 10 : 0,
     // Для совместимости со старым форматом
     revenue_completion_pct: 100,
